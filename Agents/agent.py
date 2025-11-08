@@ -68,10 +68,10 @@ summariser_agent = Agent(
     instruction=(
         "You will receive a variable called `scraper_output` that contains a JSON list of news articles.\n"
         "Your job is to SUMMARISE each article clearly and professionally.\n\n"
-        "✅ Keep summaries **150-170 words max per article**.\n"
-        "✅ Preserve all key facts: who, what, when, where, why, quotes.\n"
-        "✅ Tone should be like a journalist writing a news digest.\n"
-        "✅ Do NOT copy/paste full article text.\n\n"
+        "Keep summaries **150-170 words max per article**.\n"
+        "Preserve all key facts: who, what, when, where, why, quotes.\n"
+        "Tone should be like a journalist writing a news digest.\n"
+        "Do NOT copy/paste full article text.\n\n"
         "Output must contain ALL articles. Do NOT merge or skip any."
     )
 )

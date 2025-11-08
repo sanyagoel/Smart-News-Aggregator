@@ -16,14 +16,14 @@ def extract_ie_article(url):
 
         container = soup.find("div", id="pcl-full-content", class_="story_details")
         if not container:
-            print(f"⚠️ Could not find full article div in: {url}")
+            print(f"Could not find full article div in: {url}")
             return None
 
         paragraphs = [p.get_text(strip=True) for p in container.find_all("p")]
         return "\n".join(paragraphs)
 
     except Exception as e:
-        print(f"❌ Error scraping Indian Express article: {e}")
+        print(f"Error scraping Indian Express article: {e}")
         return None
 
 
@@ -42,7 +42,7 @@ def scrape_sports_top_n(n=10):
         date = item.pubDate.get_text(strip=True) if item.pubDate else None
         author = item.find("dc:creator").get_text(strip=True) if item.find("dc:creator") else None
 
-        print(f"🏏 Scraping IE article: {title}")
+        print(f"Scraping IE article: {title}")
         article_text = extract_ie_article(link)
 
         results.append({
@@ -61,8 +61,8 @@ if __name__ == "__main__":
 
     for d in data:
         print("\n==============================")
-        print("📰", d["title"])
-        print("🖊️ Author:", d["author"])
-        print("🔗", d["link"])
-        print("📅", d["date"])
+        print("TITLE", d["title"])
+        print("Author:", d["author"])
+        print("LINK", d["link"])
+        print("DATE", d["date"])
         print("\nARTICLE:\n", d["article"])

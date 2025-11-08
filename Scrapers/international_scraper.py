@@ -16,14 +16,14 @@ def extract_un_article(url):
 
         container = soup.find("div", class_="clearfix text-formatted field field--name-field-text-column field--type-text-long field--label-hidden field__item")
         if not container:
-            print(f"⚠️ Could not find article content in: {url}")
+            print(f"Could not find article content in: {url}")
             return None
 
         paragraphs = [p.get_text(strip=True) for p in container.find_all("p")]
         return "\n".join(paragraphs)
 
     except Exception as e:
-        print(f"❌ Error scraping UN News article: {e}")
+        print(f"Error scraping UN News article: {e}")
         return None
 
 
@@ -38,11 +38,11 @@ def scrape_international_top_n(n=10):
 
     for item in items:
         title = item.title.get_text(strip=True)
-        link = item.guid.get_text(strip=True)   # ✅ use GUID, not <link>
+        link = item.guid.get_text(strip=True)  
         date = item.pubDate.get_text(strip=True) if item.pubDate else None
         desc = item.description.get_text(strip=True) if item.description else None
 
-        print(f"🌍 Scraping UN article: {title}")
+        print(f"Scraping UN article: {title}")
         article_text = extract_un_article(link)
 
         results.append({
@@ -61,7 +61,7 @@ if __name__ == "__main__":
 
     for d in data:
         print("\n==============================")
-        print("🌍", d["title"])
-        print("🔗", d["link"])
-        print("📅", d["date"])
+        print("TITLE", d["title"])
+        print("LINK", d["link"])
+        print("DATE", d["date"])
         print("\nARTICLE:\n", d["article"])

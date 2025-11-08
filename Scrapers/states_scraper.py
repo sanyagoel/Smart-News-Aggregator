@@ -14,18 +14,16 @@ def extract_toi_article(url):
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
 
-        # ✅ Main div containing article content
         container = soup.find("div", class_="_s30J clearfix")
         if not container:
-            print(f"⚠️ Could not find article body in: {url}")
+            print(f"Could not find article body in: {url}")
             return None
 
-        # ✅ Extract ALL visible text inside the div (no <p> tags here)
         article_text = container.get_text(separator="\n", strip=True)
         return article_text
 
     except Exception as e:
-        print(f"❌ Error scraping article page: {e}")
+        print(f"Error scraping article page: {e}")
         return None
 
 
@@ -36,11 +34,11 @@ def scrape_states_top_n(state_id, n=10):
 
     state_link = soup.find(id=state_id)
     if not state_link:
-        print(f"❌ No link found with ID '{state_id}'")
+        print(f"No link found with ID '{state_id}'")
         return []
 
     rss_url = state_link.get("href")
-    print(f"🔗 Fetching RSS feed: {rss_url}")
+    print(f"Fetching RSS feed: {rss_url}")
 
     resp = requests.get(rss_url, headers=headers, timeout=10)
     feed = BeautifulSoup(resp.text, "xml")
@@ -70,7 +68,7 @@ if __name__ == "__main__":
 
     for d in data:
         print("\n==============================")
-        print("📰", d["title"])
-        print("🔗", d["link"])
-        print("📅", d["date"])
+        print("TITLE", d["title"])
+        print("LINK", d["link"])
+        print("DATE", d["date"])
         print("\nARTICLE:\n", d["article"])

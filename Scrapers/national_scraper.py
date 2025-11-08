@@ -16,14 +16,14 @@ def extract_article_text(url):
 
         body = soup.find("div", class_="schemaDiv", itemprop="articleBody")
         if not body:
-            print(f"⚠️ Could not find articleBody in: {url}")
+            print(f"Could not find articleBody in: {url}")
             return None
 
         paragraphs = [p.get_text(strip=True) for p in body.find_all("p")]
         return "\n".join(paragraphs)
 
     except Exception as e:
-        print(f"❌ Error scraping article page: {e}")
+        print(f"Error scraping article page: {e}")
         return None
 
 
@@ -42,7 +42,7 @@ def scrape_national_top_n(n=10):
         date = item.pubDate.get_text(strip=True) if item.pubDate else None
         category = item.category.get_text(strip=True) if item.category else None
 
-        print(f"📰 Scraping article: {title}")
+        print(f"Scraping article: {title}")
         article_text = extract_article_text(link)
 
         results.append({
@@ -61,8 +61,8 @@ if __name__ == "__main__":
 
     for d in data:
         print("\n==============================")
-        print("📰", d["title"])
-        print("🔗", d["link"])
-        print("📅", d["date"])
-        print("🏷️", d["category"])
-        print("\nARTICLE:\n", d["article"])  # preview 300 chars
+        print("TITLE", d["title"])
+        print("LINK", d["link"])
+        print("DATE", d["date"])
+        print("CATEGORY", d["category"])
+        print("\nARTICLE:\n", d["article"])  
