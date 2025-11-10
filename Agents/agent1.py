@@ -1,8 +1,14 @@
 import json
-from google.adk.agents.llm_agent import Agent
-from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
+from typing import Optional, Dict, Any, Set, List
+from pydantic import BaseModel
+from google.adk.agents import LlmAgent, SequentialAgent
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
+from google.adk.models.llm_response import LlmResponse
+from google.genai import types as genai_types
+from google.adk.tools.base_tool import BaseTool
+from google.adk.tools.tool_context import ToolContext
 
-# from google.adk.agents.tool import tool
 
 from Scrapers.entertainment_scraper import scrape_entertainment_top_n
 from Scrapers.sports_scraper import scrape_sports_top_n
@@ -12,45 +18,115 @@ from Scrapers.states_scraper import scrape_states_top_n
 
 
 
-def get_states_news(state: str, limit: int = 10) -> str:
-    """Returns latest state-level news. Example: state='mumbai'"""
-    data = scrape_states_top_n(state, limit)
-    return json.dumps(data, ensure_ascii=False)
-
-
-def get_national_news(limit: int = 10) -> str:
-    """Returns latest national-level Indian news."""
-    data = scrape_national_top_n(limit)
-    return json.dumps(data, ensure_ascii=False)
-
-
-def get_international_news(limit: int = 10) -> str:
-    """Returns recent global/international news."""
-    data = scrape_international_top_n(limit)
-    return json.dumps(data, ensure_ascii=False)
-
-
-def get_sports_news(limit: int = 10) -> str:
-    """Returns top sports headlines."""
-    data = scrape_sports_top_n(limit)
-    return json.dumps(data, ensure_ascii=False)
-
-
-def get_entertainment_news(limit: int = 10) -> str:
-    """Returns latest entertainment news."""
-    data = scrape_entertainment_top_n(limit)
-    return json.dumps(data, ensure_ascii=False)
+STYLE_OF_WRITING = "sarcastic"      
+TARGET_LANGUAGE = "hi"               # ISO code, e.g. hi=Hindi, en=English, ta=Tamil
 
 
 
-scraper_agent = Agent(
+class NewsItem(BaseModel):
+    title: str
+    link: str
+    date: str
+    author: Optional[str] = ""
+    article: Optional[str] = ""
+
+
+
+BANNED_WORDS: Set[str] = {
+    "kill yourself", "how to make a bomb", "i will kill you", "rape",
+    "nazi", "faggot", "retard", "child assault", "autistic", "murder"
+}
+
+NEWS_KEYWORDS: Set[str] = {
+    "news", "headlines", "article", "happening in", "sports",
+    "entertainment", "politics", "business", "tech", "latest",
+    "updates", "breaking", "tell me about", "what's new", "information"
+}
+
+VALID_STATES: Set[str] = {
+    "mumbai", "delhi", "bengaluru", "kolkata", "chennai", "pune",
+    "hyderabad", "ahmedabad", "maharashtra", "karnataka",
+    "west bengal", "tamil nadu", "gujarat", "uttar pradesh",
+    "rajasthan", "punjab", "kerala", "andhra pradesh", "goa"
+}
+
+
+def input_guardrail(callback_context: CallbackContext, llm_request: LlmRequest) -> Optional[LlmResponse]:
+    """Prevents harmful or off-topic user input."""
+    last_user_text = ""
+    if llm_request.contents:
+        for c in reversed(llm_request.contents):
+            if c.role == "user" and c.parts and c.parts[0].text:
+                last_user_text = c.parts[0].text.lower()
+                break
+
+    if not last_user_text:
+        return None
+
+    if any(w in last_user_text for w in BANNED_WORDS):
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text="I cannot process this request due to a content policy violation.")]
+            )
+        )
+
+    if not any(w in last_user_text for w in NEWS_KEYWORDS):
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text="I am a news assistant. I can only fetch news, headlines, and articles.")]
+            )
+        )
+
+    return None
+
+
+def tool_guardrail(tool: BaseTool, args: Dict[str, Any], tool_context: ToolContext) -> Optional[Dict]:
+    """Ensures valid state/city input for news tools."""
+    if tool.name == "get_states_news":
+        state = args.get("state", "").lower().strip()
+        if not state:
+            return {
+                "status": "error",
+                "error_message": "You asked for state news but did not provide a state or city."
+            }
+        if state not in VALID_STATES:
+            return {
+                "status": "error",
+                "error_message": f"Policy Error: I do not have news for '{state}'. Please try a valid Indian state or city."
+            }
+    return None
+
+
+
+def wrap(items: list) -> List[NewsItem]:
+    """Wraps dicts into Pydantic NewsItem, skipping entries without articles."""
+    return [NewsItem(**item) for item in items if item.get("article")]
+
+
+def get_states_news(state: str, limit: int = 10) -> List[NewsItem]:
+    return wrap(scrape_states_top_n(state, limit))
+
+def get_national_news(limit: int = 10) -> List[NewsItem]:
+    return wrap(scrape_national_top_n(limit))
+
+def get_international_news(limit: int = 10) -> List[NewsItem]:
+    return wrap(scrape_international_top_n(limit))
+
+def get_sports_news(limit: int = 10) -> List[NewsItem]:
+    return wrap(scrape_sports_top_n(limit))
+
+def get_entertainment_news(limit: int = 10) -> List[NewsItem]:
+    return wrap(scrape_entertainment_top_n(limit))
+
+
+
+scraper_agent = LlmAgent(
     model="gemini-2.5-flash",
-    name="root_agent",
-    description="A news assistant that fetches live scraped content.",
-    instruction=(
-        "When the user asks for news, ALWAYS call the correct tool instead of generating fake data. "
-        "Use the tools to fetch real scraped news."
-    ),
+    name="scraper_agent",
+    instruction="Always call a tool to fetch real scraped news. Never fabricate news.",
+    description="Fetches real scraped news and stores structured data.",
     tools=[
         get_states_news,
         get_national_news,
@@ -58,30 +134,57 @@ scraper_agent = Agent(
         get_sports_news,
         get_entertainment_news,
     ],
-    output_key = "scraper_output"
+    output_key="scraper_output",
+    before_model_callback=input_guardrail,
+    before_tool_callback=tool_guardrail
 )
 
-summariser_agent = Agent(
+
+summariser_agent = LlmAgent(
     model="gemini-2.5-flash",
     name="summariser_agent",
-    description="Converts raw scraped news JSON into a polished readable report.",
+    description=f"Summarises scraped articles and writes in a {STYLE_OF_WRITING} tone.",
     instruction=(
-        "You will receive a variable called `scraper_output` that contains a JSON list of news articles.\n"
-        "Your job is to SUMMARISE each article clearly and professionally.\n\n"
-        "Keep summaries **150-170 words max per article**.\n"
-        "Preserve all key facts: who, what, when, where, why, quotes.\n"
-        "Tone should be like a journalist writing a news digest.\n"
-        "Do NOT copy/paste full article text.\n\n"
-        "Output must contain ALL articles. Do NOT merge or skip any."
-    )
+        f"You will receive a list of `scraper_output` items, each matching this schema:\n"
+        "{ title, link, date, author, article }\n\n"
+        f"Write a **clean markdown news report** in a **{STYLE_OF_WRITING} tone**.\n\n"
+        "For EACH item:\n"
+        "  • Print the title as a markdown H2\n"
+        "  • Then show: Date | Author | Source link\n"
+        f"  • Summarise ONLY the `article` field into 120–160 words, with a {STYLE_OF_WRITING} writing style.\n"
+        "  • Do NOT remove or merge articles\n"
+        "  • No bullet dumps, no walls of text – clean readable formatting.\n\n"
+        "Example Format:\n"
+        "## India signs new tech deal with Japan\n"
+        "**Date:** Feb 15, 2025 | **Author:** TOI Desk | [Source](https://example.com)\n\n"
+        f"Summary paragraph here (written in a {STYLE_OF_WRITING} tone)...\n"
+    ),
+    output_key="summary_output"
 )
+
+
+multilingual_agent = LlmAgent(
+    name="MultilingualTranslatorAgent",
+    model="gemini-2.5-flash",
+    instruction=(
+        f"You are a multilingual translator. Translate the markdown text found in 'summary_output' "
+        f"into **{TARGET_LANGUAGE}** (ISO 639-1 code). "
+        "Preserve Markdown formatting.\n\n"
+        "Rules:\n"
+        "- Do not translate URLs, code blocks, or text inside backticks.\n"
+        "- Preserve names, dates, and quoted entities.\n"
+        "- Keep the same structure, spacing, and formatting.\n"
+        "- Output ONLY the translated text (no explanations).\n"
+    ),
+    output_key="translated_text"
+)
+
 
 
 root_agent = SequentialAgent(
     name="NewsPipeline",
-    sub_agents=[
-        scraper_agent,
-        summariser_agent,
-    ],
-    description="Fetches news through scraping tools, then formats them into a clean report.")
+    sub_agents=[scraper_agent, summariser_agent, multilingual_agent],
+    description=f"Fetches scraped news → Summarises in {STYLE_OF_WRITING} tone → Translates to {TARGET_LANGUAGE.upper()}."
+)
 
+print(f"FINAL PIPELINE READY — Style: {STYLE_OF_WRITING} | Language: {TARGET_LANGUAGE.upper()}")

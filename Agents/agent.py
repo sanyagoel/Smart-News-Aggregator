@@ -202,7 +202,9 @@
 # print(f"Scraper agent '{scraper_agent.name}' is now protected.")
 
 
+import datetime
 import json
+import logging
 from typing import Optional, Dict, Any, Set, List
 from pydantic import BaseModel
 from google.adk.agents import LlmAgent, Agent, SequentialAgent
@@ -297,7 +299,56 @@ def tool_guardrail(tool: BaseTool, args: Dict[str, Any], tool_context: ToolConte
             }
     return None
 
+def before_agent_callback(callback_context: CallbackContext):
+    """Logs start of agent execution."""
+    state = callback_context.state
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Initialize global counter
+    state["run_counter"] = state.get("run_counter", 0) + 1
+    state["last_agent_start"] = timestamp
+
+    print(f"\n=== AGENT START] ===")
+    print(f"Run #: {state['run_counter']}")
+    print(f"Timestamp: {timestamp}")
+
+    # Also log via logging module
+    logging.info(f"Starting agent (Run #{state['run_counter']}) at {timestamp}")
+
+    return None
+
+
+def after_agent_callback(callback_context: CallbackContext):
+    """Logs end of agent execution and duration."""
+    state = callback_context.state
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Compute duration if possible
+    try:
+        start_str = state.get("last_agent_start")
+        if start_str:
+            start_dt = datetime.datetime.strptime(start_str, "%Y-%m-%d %H:%M:%S")
+            duration = (datetime.datetime.now() - start_dt).total_seconds()
+        else:
+            duration = None
+    except Exception:
+        duration = None
+
+    print(f"=== AGENT END ===")
+    if duration is not None:
+        print(f"Duration: {duration:.2f}s")
+        logging.info(f"Completed agent in {duration:.2f}s")
+    else:
+        logging.info(f"Completed agent (no duration recorded)")
+
+    # Record completion in state
+    state["last_agent_end"] = timestamp
+    state.setdefault("agent_timeline", []).append({
+        "completed_at": timestamp,
+        "duration_sec": duration
+    })
+
+    return None
 
 def wrap(items: list) -> List[NewsItem]:
     return [NewsItem(**item) for item in items]
@@ -335,7 +386,9 @@ scraper_agent = LlmAgent(
     ],
     output_key="scraper_output",
     before_model_callback=input_guardrail,
-    before_tool_callback=tool_guardrail
+    before_tool_callback=tool_guardrail,
+    before_agent_callback=before_agent_callback,
+    after_agent_callback=after_agent_callback
 )
 
 
@@ -359,7 +412,9 @@ summariser_agent = LlmAgent(
         "## India signs new tech deal with Japan\n"
         "**Date:** Feb 15, 2025 | **Author:** TOI Desk | [Source](https://example.com)\n\n"
         "Summary paragraph here...\n"
-    )
+    ),
+    before_agent_callback=before_agent_callback,
+    after_agent_callback=after_agent_callback
 )
 
 
