@@ -1,8 +1,17 @@
 import json
 from google.adk.agents.llm_agent import Agent
 from google.adk.agents import LlmAgent, SequentialAgent, ParallelAgent
-
 # from google.adk.agents.tool import tool
+
+
+from typing import Optional, Dict, Any, Set
+from google.adk.agents.callback_context import CallbackContext
+from google.adk.models.llm_request import LlmRequest
+from google.adk.models.llm_response import LlmResponse
+from google.genai import types as genai_types 
+from google.adk.tools.base_tool import BaseTool
+from google.adk.tools.tool_context import ToolContext
+
 
 from Scrapers.entertainment_scraper import scrape_entertainment_top_n
 from Scrapers.sports_scraper import scrape_sports_top_n
@@ -12,29 +21,53 @@ from Scrapers.states_scraper import scrape_states_top_n
 
 
 
+BANNED_WORDS: Set[str] = {
+    "kill yourself", "how to make a bomb", "i will kill you", "rape", 
+    "nazi", "faggot", "retard", "child porn" ,"autistic","murder"
+}
+
+NEWS_KEYWORDS: Set[str] = {
+    "news", "headlines", "article", "happening in", "sports", 
+    "entertainment", "politics", "business", "tech", "latest", 
+    "updates", "breaking", "tell me about", "what's new","information"
+}
+
+
+VALID_STATES: Set[str] = {
+    "mumbai", "delhi", "bengaluru", "kolkata", "chennai", "pune", 
+    "hyderabad", "ahmedabad", "maharashtra", "karnataka", 
+    "west bengal", "tamil nadu", "gujarat", "uttar pradesh", 
+    "rajasthan", "punjab", "kerala", "andhra pradesh", "goa"
+}
+
+MAX_ARTICLE_LIMIT: int = 20
+
+SCRAPER_TOOL_NAMES: Set[str] = {
+    "get_states_news", "get_national_news", "get_international_news",
+    "get_sports_news", "get_entertainment_news"
+}
+
+
+
 def get_states_news(state: str, limit: int = 10) -> str:
     """Returns latest state-level news. Example: state='mumbai'"""
     data = scrape_states_top_n(state, limit)
     return json.dumps(data, ensure_ascii=False)
-
 
 def get_national_news(limit: int = 10) -> str:
     """Returns latest national-level Indian news."""
     data = scrape_national_top_n(limit)
     return json.dumps(data, ensure_ascii=False)
 
-
 def get_international_news(limit: int = 10) -> str:
     """Returns recent global/international news."""
     data = scrape_international_top_n(limit)
     return json.dumps(data, ensure_ascii=False)
 
-
 def get_sports_news(limit: int = 10) -> str:
     """Returns top sports headlines."""
     data = scrape_sports_top_n(limit)
     return json.dumps(data, ensure_ascii=False)
-
 
 def get_entertainment_news(limit: int = 10) -> str:
     """Returns latest entertainment news."""
@@ -43,9 +76,87 @@ def get_entertainment_news(limit: int = 10) -> str:
 
 
 
+def input_guardrail(
+    callback_context: CallbackContext, llm_request: LlmRequest
+) -> Optional[LlmResponse]:
+    """
+    INPUT GUARDRAIL (before_model_callback)
+    1. Checks for BANNED_WORDS.
+    2. Checks for off-topic requests (missing NEWS_KEYWORDS).
+    """
+    print(f"--- Callback: input_guardrail running for agent: {callback_context.agent_name} ---")
+
+    last_user_message_text = ""
+    if llm_request.contents:
+        for content in reversed(llm_request.contents):
+            if content.role == 'user' and content.parts:
+                if content.parts[0].text:
+                    last_user_message_text = content.parts[0].text.lower()
+                    break
+    
+    if not last_user_message_text:
+        print("--- Callback: No user text found. Allowing. ---")
+        return None # No text to check, allow
+
+    # guard rail 1 - user input containing banned words
+    if any(word in last_user_message_text for word in BANNED_WORDS):
+        print(f"--- Callback: Found banned word. Blocking LLM call! ---")
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text="I cannot process this request due to a content policy violation.")]
+            )
+        )
+
+    # guard rail 2 user asking for unrelated information -
+    if not any(keyword in last_user_message_text for keyword in NEWS_KEYWORDS):
+        print(f"--- Callback: Request appears off-topic. Blocking LLM call! ---")
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text="I am a news assistant. I can only fetch news, headlines, and articles.")]
+            )
+        )
+
+    print(f"--- Callback: Input passed guardrails. Allowing LLM call. ---")
+    return None 
+
+def tool_guardrail(
+    tool: BaseTool, args: Dict[str, Any], tool_context: ToolContext
+) -> Optional[Dict]:
+    """
+    TOOL GUARDRAIL (before_tool_callback)
+    1. Validates 'state' argument for 'get_states_news' tool.
+    """
+    tool_name = tool.name
+    print(f"--- Callback: tool_guardrail running for tool '{tool_name}' ---")
+            
+    # guardrail 3 - making sure valid states is given.
+    if tool_name == "get_states_news":
+        state_arg = args.get("state", "").lower().strip() 
+        
+        if not state_arg:
+            print(f"--- Callback: 'get_states_news' called with no state. Blocking. ---")
+            return {
+                "status": "error",
+                "error_message": "You asked for state news but did not provide a state or city. Please specify one (e.g., 'news from Mumbai')."
+            }
+
+        if state_arg not in VALID_STATES:
+            print(f"--- Callback: Invalid state '{state_arg}'. Blocking tool. ---")
+            return {
+                "status": "error",
+                "error_message": f"Policy Error: I do not have news for '{args.get('state')}'. Please try a valid Indian state or major city."
+            }
+    
+    print(f"--- Callback: Tool args passed guardrails. Allowing tool '{tool_name}' to run. ---")
+    return None 
+
+
+
 scraper_agent = Agent(
     model="gemini-2.5-flash",
-    name="root_agent",
+    name="scraper_agent", 
     description="A news assistant that fetches live scraped content.",
     instruction=(
         "When the user asks for news, ALWAYS call the correct tool instead of generating fake data. "
@@ -58,7 +169,10 @@ scraper_agent = Agent(
         get_sports_news,
         get_entertainment_news,
     ],
-    output_key = "scraper_output"
+    output_key = "scraper_output",
+    
+    before_model_callback=input_guardrail,
+    before_tool_callback=tool_guardrail
 )
 
 summariser_agent = Agent(
@@ -76,13 +190,15 @@ summariser_agent = Agent(
     )
 )
 
-
 root_agent = SequentialAgent(
     name="NewsPipeline",
     sub_agents=[
-        scraper_agent,
+        scraper_agent, 
         summariser_agent,
     ],
     description="Fetches news through scraping tools, then formats them into a clean report.")
+
+print("✅ Agents defined with Input and Tool Guardrails.")
+print(f"Scraper agent '{scraper_agent.name}' is now protected.")
 
 
