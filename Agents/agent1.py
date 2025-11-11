@@ -9,7 +9,7 @@ from google.genai import types as genai_types
 from google.adk.tools.base_tool import BaseTool
 from google.adk.tools.tool_context import ToolContext
 
-
+ 
 from Scrapers.entertainment_scraper import scrape_entertainment_top_n
 from Scrapers.sports_scraper import scrape_sports_top_n
 from Scrapers.international_scraper import scrape_international_top_n
@@ -29,6 +29,7 @@ class NewsItem(BaseModel):
     date: str
     author: Optional[str] = ""
     article: Optional[str] = ""
+    image_url: Optional[str] = None
 
 
 
@@ -123,7 +124,7 @@ def get_entertainment_news(limit: int = 10) -> List[NewsItem]:
 
 
 scraper_agent = LlmAgent(
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     name="scraper_agent",
     instruction="Always call a tool to fetch real scraped news. Never fabricate news.",
     description="Fetches real scraped news and stores structured data.",
@@ -138,24 +139,52 @@ scraper_agent = LlmAgent(
     before_model_callback=input_guardrail,
     before_tool_callback=tool_guardrail
 )
+# summariser_agent = LlmAgent(
+#     model="gemini-2.5-flash-lite",
+#     name="summariser_agent",
+#     description=f"Summarises scraped articles and writes in a {STYLE_OF_WRITING} tone.",
+#     instruction=(
+#         f"You will receive a list of `scraper_output` items, each matching this schema:\n"
+#         "{ title, link, date, author, article }\n\n"
+#         f"Write a **clean markdown news report** in a **{STYLE_OF_WRITING} tone**.\n\n"
+#         "CRITICAL RULES:\n"
+#         "1. Output ONLY the formatted markdown — no prefatory text like 'Here’s a summary' or explanations.\n"
+#         "2. For EACH item:\n"
+#         "   • Print the title as a markdown H2\n"
+#         "   • Then show: Date | Author | Source link\n"
+#         f"   • Summarise ONLY the `article` field into 120–160 words, in {STYLE_OF_WRITING} tone.\n"
+#         "3. Do NOT merge articles or skip any.\n"
+#         "4. No bullet lists, no prefaces, no closing remarks.\n\n"
+#         "Example Output:\n"
+#         "## India signs new tech deal with Japan\n"
+#         "**Date:** Feb 15, 2025 | **Author:** TOI Desk | [Source](https://example.com)\n\n"
+#         f"Summary paragraph here (written in a {STYLE_OF_WRITING} tone)...\n"
+#     ),
+#     output_key="summary_output"
+# )
 
 
 summariser_agent = LlmAgent(
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     name="summariser_agent",
     description=f"Summarises scraped articles and writes in a {STYLE_OF_WRITING} tone.",
     instruction=(
         f"You will receive a list of `scraper_output` items, each matching this schema:\n"
-        "{ title, link, date, author, article }\n\n"
+        "{ title, link, date, author, article, image_url }\n\n"
         f"Write a **clean markdown news report** in a **{STYLE_OF_WRITING} tone**.\n\n"
-        "For EACH item:\n"
-        "  • Print the title as a markdown H2\n"
-        "  • Then show: Date | Author | Source link\n"
-        f"  • Summarise ONLY the `article` field into 120–160 words, with a {STYLE_OF_WRITING} writing style.\n"
-        "  • Do NOT remove or merge articles\n"
-        "  • No bullet dumps, no walls of text – clean readable formatting.\n\n"
-        "Example Format:\n"
+        "CRITICAL RULES:\n"
+        "1. Output ONLY the formatted markdown — no prefatory text like 'Here’s a summary' or explanations.\n"
+        "2. For EACH item:\n"
+        "   • Print the title as a markdown H2\n"
+        "   • Then show: Date | Author | Source link\n"
+        "   • If `image_url` is available, do NOT embed the image — just print the link as:\n"
+        "     **Image:** image_url\n"
+        f"   • Summarise ONLY the `article` field into 120–160 words, in {STYLE_OF_WRITING} tone.\n"
+        "3. Do NOT merge articles or skip any.\n"
+        "4. No bullet lists, no prefaces, no closing remarks.\n\n"
+        "Example Output:\n"
         "## India signs new tech deal with Japan\n"
+        "**Image:** https://example.com/image.jpg\n"
         "**Date:** Feb 15, 2025 | **Author:** TOI Desk | [Source](https://example.com)\n\n"
         f"Summary paragraph here (written in a {STYLE_OF_WRITING} tone)...\n"
     ),
@@ -163,10 +192,14 @@ summariser_agent = LlmAgent(
 )
 
 
+
+
 multilingual_agent = LlmAgent(
     name="MultilingualTranslatorAgent",
-    model="gemini-2.5-flash",
+    model="gemini-2.5-flash-lite",
     instruction=(
+        "Use the **entire text** from the 'summary_output' variable as your translation source.\n"
+        "Do not summarize, skip, or shorten it.\n"
         f"You are a multilingual translator. Translate the markdown text found in 'summary_output' "
         f"into **{TARGET_LANGUAGE}** (ISO 639-1 code). "
         "Preserve Markdown formatting.\n\n"

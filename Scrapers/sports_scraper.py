@@ -28,7 +28,7 @@ def extract_ie_article(url):
 
 
 def scrape_sports_top_n(n=10):
-    """Scrape RSS feed + full article text for top N sports stories."""
+    """Scrape RSS feed + full article text for top N sports stories (with image URL)."""
     resp = requests.get(IE_RSS_URL, headers=headers, timeout=10)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "xml")
@@ -42,6 +42,9 @@ def scrape_sports_top_n(n=10):
         date = item.pubDate.get_text(strip=True) if item.pubDate else None
         author = item.find("dc:creator").get_text(strip=True) if item.find("dc:creator") else None
 
+        media_tag = item.find("media:content")
+        image_url = media_tag["url"].strip() if media_tag and media_tag.has_attr("url") else None
+
         print(f"Scraping IE article: {title}")
         article_text = extract_ie_article(link)
 
@@ -50,7 +53,8 @@ def scrape_sports_top_n(n=10):
             "link": link,
             "date": date,
             "author": author,
-            "article": article_text
+            "article": article_text,
+            "image_url": image_url
         })
 
     return results
@@ -61,8 +65,9 @@ if __name__ == "__main__":
 
     for d in data:
         print("\n==============================")
-        print("TITLE", d["title"])
-        print("Author:", d["author"])
-        print("LINK", d["link"])
-        print("DATE", d["date"])
+        print("TITLE:", d["title"])
+        print("AUTHOR:", d["author"])
+        print("LINK:", d["link"])
+        print("DATE:", d["date"])
+        print("IMAGE:", d["image_url"])
         print("\nARTICLE:\n", d["article"])

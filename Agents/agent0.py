@@ -18,6 +18,7 @@ from Scrapers.international_scraper import scrape_international_top_n
 from Scrapers.national_scraper import scrape_national_top_n
 from Scrapers.states_scraper import scrape_states_top_n
 
+from Agents.hallucination_guardrail import run_hallucination_guardrail
 
 
 STYLE_OF_WRITING = "sarcastic"      
@@ -55,6 +56,7 @@ VALID_STATES: Set[str] = {
 
 
 def input_guardrail(callback_context: CallbackContext, llm_request: LlmRequest) -> Optional[LlmResponse]:
+    """Prevents harmful or off-topic user input."""
     last_user_text = ""
     if llm_request.contents:
         for c in reversed(llm_request.contents):
@@ -65,28 +67,23 @@ def input_guardrail(callback_context: CallbackContext, llm_request: LlmRequest) 
     if not last_user_text:
         return None
 
-    # Harmful content
     if any(w in last_user_text for w in BANNED_WORDS):
-        callback_context.state["abort_pipeline"] = True  # <--- mark stop
         return LlmResponse(
             content=genai_types.Content(
                 role="model",
-                parts=[genai_types.Part(text="🚫 I cannot process this request due to a content policy violation.")]
+                parts=[genai_types.Part(text="I cannot process this request due to a content policy violation.")]
             )
         )
 
-    # Not news-related
     if not any(w in last_user_text for w in NEWS_KEYWORDS):
-        callback_context.state["abort_pipeline"] = True  # <--- mark stop
         return LlmResponse(
             content=genai_types.Content(
                 role="model",
-                parts=[genai_types.Part(text="📰 I am a news assistant. I can only fetch news, headlines, and articles.")]
+                parts=[genai_types.Part(text="I am a news assistant. I can only fetch news, headlines, and articles.")]
             )
         )
 
     return None
-
 
 
 def tool_guardrail(tool: BaseTool, args: Dict[str, Any], tool_context: ToolContext) -> Optional[Dict]:
@@ -104,6 +101,50 @@ def tool_guardrail(tool: BaseTool, args: Dict[str, Any], tool_context: ToolConte
                 "error_message": f"Policy Error: I do not have news for '{state}'. Please try a valid Indian state or city."
             }
     return None
+
+
+def hallucination_guardrail_callback(callback_context: CallbackContext) -> Optional[LlmResponse]:
+    """
+    Runs the hallucination guardrail before the multilingual translation agent.
+    If hallucinated, block further execution.
+    """
+    state = callback_context.state
+    context = str(state.get("scraper_output", ""))
+    summary_output = state.get("summary_output", "")
+
+    if not context or not summary_output:
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text="Missing context or summary for hallucination validation.")]
+            )
+        )
+
+    try:
+        result = run_hallucination_guardrail(context=context, summary_output=summary_output)
+
+        if not result["valid"]:
+            feedback = result["feedback"]
+            print(f"🚫 Hallucination detected: {feedback}")
+            return LlmResponse(
+                content=genai_types.Content(
+                    role="model",
+                    parts=[genai_types.Part(text=f"Hallucination detected: {feedback}")]
+                )
+            )
+
+        print("✅ Guardrail passed — continuing to translation.")
+
+    except Exception as e:
+        print(f"❌ Error while running hallucination guardrail: {e}")
+        return LlmResponse(
+            content=genai_types.Content(
+                role="model",
+                parts=[genai_types.Part(text=f"Error while validating hallucination: {e}")]
+            )
+        )
+
+    return None  # Continue normally
 
 
 
@@ -127,7 +168,23 @@ def get_sports_news(limit: int = 10) -> List[NewsItem]:
 def get_entertainment_news(limit: int = 10) -> List[NewsItem]:
     return wrap(scrape_entertainment_top_n(limit))
 
+def before_agent_callback(callback_context: CallbackContext):
+    """Logs start of agent execution."""
+    state = callback_context.state
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
+    # Initialize global counter
+    state["run_counter"] = state.get("run_counter", 0) + 1
+    state["last_agent_start"] = timestamp
+
+    print(f"\n=== AGENT START] ===")
+    print(f"Run #: {state['run_counter']}")
+    print(f"Timestamp: {timestamp}")
+
+    # Also log via logging module
+    logging.info(f"Starting agent (Run #{state['run_counter']}) at {timestamp}")
+
+    return None
 
 
 def after_agent_callback(callback_context: CallbackContext):
@@ -178,6 +235,8 @@ scraper_agent = LlmAgent(
     output_key="scraper_output",
     before_model_callback=input_guardrail,
     before_tool_callback=tool_guardrail,
+    before_agent_callback=before_agent_callback,
+    after_agent_callback=after_agent_callback
 )
 # summariser_agent = LlmAgent(
 #     model="gemini-2.5-flash-lite",
@@ -228,6 +287,8 @@ summariser_agent = LlmAgent(
         f"Summary paragraph here (written in a {STYLE_OF_WRITING} tone)...\n"
     ),
     output_key="summary_output",
+    before_agent_callback=before_agent_callback,
+    after_agent_callback=after_agent_callback
 )
 
 
@@ -249,7 +310,7 @@ multilingual_agent = LlmAgent(
         "- Output ONLY the translated text (no explanations).\n"
     ),
     output_key="translated_text",
-)
+    before_agent_callback=hallucination_guardrail_callback)
 
 
 

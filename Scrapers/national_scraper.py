@@ -7,6 +7,7 @@ headers = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 }
 
+
 def extract_article_text(url):
     """Scrape full article text from The Hindu article page."""
     try:
@@ -28,7 +29,7 @@ def extract_article_text(url):
 
 
 def scrape_national_top_n(n=10):
-    """Scrape RSS + article text for top N items."""
+    """Scrape RSS feed + article text for top N news items, including image URL."""
     resp = requests.get(HINDU_RSS_URL, headers=headers, timeout=10)
     resp.raise_for_status()
     soup = BeautifulSoup(resp.text, "xml")
@@ -42,6 +43,9 @@ def scrape_national_top_n(n=10):
         date = item.pubDate.get_text(strip=True) if item.pubDate else None
         category = item.category.get_text(strip=True) if item.category else None
 
+        media_tag = item.find("media:content")
+        image_url = media_tag["url"].strip() if media_tag and media_tag.has_attr("url") else None
+
         print(f"Scraping article: {title}")
         article_text = extract_article_text(link)
 
@@ -50,7 +54,8 @@ def scrape_national_top_n(n=10):
             "link": link,
             "date": date,
             "category": category,
-            "article": article_text
+            "article": article_text,
+            "image_url": image_url
         })
 
     return results
@@ -61,8 +66,9 @@ if __name__ == "__main__":
 
     for d in data:
         print("\n==============================")
-        print("TITLE", d["title"])
-        print("LINK", d["link"])
-        print("DATE", d["date"])
-        print("CATEGORY", d["category"])
-        print("\nARTICLE:\n", d["article"])  
+        print("TITLE:", d["title"])
+        print("LINK:", d["link"])
+        print("DATE:", d["date"])
+        print("CATEGORY:", d["category"])
+        print("IMAGE:", d["image_url"])
+        print("\nARTICLE:\n", d["article"])
